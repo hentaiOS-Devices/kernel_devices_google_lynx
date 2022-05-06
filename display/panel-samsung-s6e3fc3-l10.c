@@ -489,6 +489,7 @@ static void s6e3fc3_l10_set_nolp_mode(struct exynos_panel *ctx,
 	EXYNOS_DCS_WRITE_TABLE(ctx, display_off);
 	EXYNOS_DCS_WRITE_TABLE(ctx, test_key_on_f0);
 	EXYNOS_DCS_WRITE_TABLE(ctx, new_gamma_ip_enable);
+	/* backlight control and dimming */
 	s6e3fc3_l10_update_wrctrld(ctx);
 	EXYNOS_DCS_WRITE_TABLE(ctx, test_key_off_f0);
 	s6e3fc3_l10_change_frequency(ctx, vrefresh);
@@ -549,8 +550,25 @@ static void s6e3fc3_l10_set_hbm_mode(struct exynos_panel *exynos_panel,
 
 	exynos_panel->hbm_mode = mode;
 
-	if (hbm_update)
+	if (hbm_update) {
+		if (mode) {
+			EXYNOS_DCS_WRITE_TABLE(exynos_panel, test_key_on_f0);
+			/* global para */
+			EXYNOS_DCS_WRITE_SEQ(exynos_panel, 0xB0, 0x28, 0xF2);
+			/* global para 10bit */
+			EXYNOS_DCS_WRITE_SEQ(exynos_panel, 0xF2, 0xCC);
+			/* global para */
+			EXYNOS_DCS_WRITE_SEQ(exynos_panel, 0xB0, 0x02, 0x33, 0x65);
+			/* 1 pulse setting */
+			EXYNOS_DCS_WRITE_SEQ(exynos_panel, 0x65, 0x01);
+			/* global para */
+			EXYNOS_DCS_WRITE_SEQ(exynos_panel, 0xB0, 0x00, 0x28, 0xF2);
+			/* global para 8bit */
+			EXYNOS_DCS_WRITE_SEQ(exynos_panel, 0xF2, 0xC4);
+			EXYNOS_DCS_WRITE_TABLE(exynos_panel, test_key_off_f0);
+		}
 		s6e3fc3_l10_update_wrctrld(exynos_panel);
+	}
 
 	if (irc_update) {
 		EXYNOS_DCS_WRITE_SEQ(exynos_panel, 0xF0, 0x5A, 0x5A);
@@ -565,7 +583,13 @@ static void s6e3fc3_l10_set_hbm_mode(struct exynos_panel *exynos_panel,
 static void s6e3fc3_l10_set_dimming_on(struct exynos_panel *exynos_panel,
 				 bool dimming_on)
 {
+	const struct exynos_panel_mode *pmode = exynos_panel->current_mode;
+
 	exynos_panel->dimming_on = dimming_on;
+	if (pmode->exynos_mode.is_lp_mode) {
+		dev_info(exynos_panel->dev, "in lp mode, skip to update");
+		return;
+	}
 
 	s6e3fc3_l10_update_wrctrld(exynos_panel);
 }
@@ -577,6 +601,26 @@ static void s6e3fc3_l10_set_local_hbm_mode(struct exynos_panel *exynos_panel,
 		return;
 
 	exynos_panel->hbm.local_hbm.enabled = local_hbm_en;
+	if (local_hbm_en) {
+		EXYNOS_DCS_WRITE_TABLE(exynos_panel, test_key_on_f0);
+		/* global para */
+		EXYNOS_DCS_WRITE_SEQ(exynos_panel, 0xB0, 0xDE, 0x66);
+		 /* LHBM EM_Off setting */
+		EXYNOS_DCS_WRITE_SEQ(exynos_panel, 0x66, 0x00, 0x49);
+		/* global para */
+		EXYNOS_DCS_WRITE_SEQ(exynos_panel, 0xB0, 0x28, 0xF2);
+		/* global para 10bit */
+		EXYNOS_DCS_WRITE_SEQ(exynos_panel, 0xF2, 0xCC);
+		/* global para */
+		EXYNOS_DCS_WRITE_SEQ(exynos_panel, 0xB0, 0x02, 0x2D, 0x65);
+		/* 1 pulse setting */
+		EXYNOS_DCS_WRITE_SEQ(exynos_panel, 0x65, 0x00, 0x72, 0x00, 0x7C, 0x00, 0x7C);
+		/* global para */
+		EXYNOS_DCS_WRITE_SEQ(exynos_panel, 0xB0, 0x00, 0x28, 0xF2);
+		/* global para 8bit */
+		EXYNOS_DCS_WRITE_SEQ(exynos_panel, 0xF2, 0xC4);
+		EXYNOS_DCS_WRITE_TABLE(exynos_panel, test_key_off_f0);
+	}
 	s6e3fc3_l10_update_wrctrld(exynos_panel);
 }
 
@@ -604,6 +648,13 @@ static void s6e3fc3_l10_panel_init(struct exynos_panel *ctx)
 					   &s6e3fc3_l10_init_cmd_set, "init");
 	s6e3fc3_l10_lhbm_gamma_read(ctx);
 	s6e3fc3_l10_lhbm_gamma_write(ctx);
+}
+
+static int s6e3fc3_l10_read_id(struct exynos_panel *ctx)
+{
+	if (ctx->panel_rev < PANEL_REV_EVT1)
+		return exynos_panel_read_id(ctx);
+	return exynos_panel_read_ddic_id(ctx);
 }
 
 static void s6e3fc3_l10_get_panel_rev(struct exynos_panel *ctx, u32 id)
@@ -798,6 +849,7 @@ static const struct exynos_panel_funcs s6e3fc3_l10_exynos_funcs = {
 	.configure_te2_edges = exynos_panel_configure_te2_edges,
 	.update_te2 = s6e3fc3_l10_update_te2,
 	.set_op_hz = s6e3fc3_l10_set_op_hz,
+	.read_id = s6e3fc3_l10_read_id,
 };
 
 const struct brightness_capability s6e3fc3_l10_brightness_capability = {

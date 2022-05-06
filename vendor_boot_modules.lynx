@@ -12,6 +12,7 @@ aoc_core.ko
 aoc_usb_driver.ko
 aoc_uwb_platform_drv.ko
 aoc_uwb_service_dev.ko
+arm-memlat-mon.ko
 at24.ko
 bbd.ko
 bc_max77759.ko
@@ -64,6 +65,7 @@ google-bms.ko
 google-charger.ko
 google-cpm.ko
 google_bcl.ko
+governor_memlat.ko
 gs-chipid.ko
 gs_acpm.ko
 gs_thermal.ko
@@ -103,6 +105,7 @@ panel-samsung-emul.ko
 panel-samsung-s6e3fc3.ko
 panel-samsung-s6e3fc3-p10.ko
 panel-samsung-s6e3fc3-l10.ko
+panel-samsung-s6e3fc5.ko
 panel-samsung-s6e3hc2.ko
 panel-samsung-s6e3hc3.ko
 panel-samsung-sofef01.ko
@@ -115,6 +118,7 @@ phy-exynos-usbdrd-super.ko
 pinctrl-samsung-core.ko
 pixel-boot-metrics.ko
 pixel-debug-test.ko
+pkvm-s2mpu.ko
 pl330.ko
 pmic_class.ko
 power_stats.ko
@@ -148,6 +152,7 @@ snd-soc-cs35l41.ko
 snd-soc-cs35l45-spi.ko
 snd-soc-cs35l45.ko
 snd-soc-wm-adsp.ko
+softdog.ko
 spi-s3c64xx.ko
 spidev.ko
 sscoredump.ko
