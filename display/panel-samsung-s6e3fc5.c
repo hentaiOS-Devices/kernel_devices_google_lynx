@@ -39,6 +39,7 @@ static const unsigned char PPS_SETTING[] = {
 #define S6E3FC5_WRCTRLD_BCTRL_BIT      0x20
 #define S6E3FC5_WRCTRLD_HBM_BIT        0xC0
 #define S6E3FC5_WRCTRLD_LOCAL_HBM_BIT  0x10
+#define LHBM_RGB_RATIO_SIZE 3
 
 static const u8 display_off[] = { 0x28 };
 static const u8 display_on[] = { 0x29 };
@@ -49,6 +50,12 @@ static const u8 test_key_off_f1[] = { 0xF1, 0xA5, 0xA5 };
 static const u8 freq_update[] = { 0xF7, 0x0F };
 static const u8 new_gamma_ip_bypass[] = { 0x68, 0x01 };
 static const u8 new_gamma_ip_enable[] = { 0x68, 0x02 };
+static const u32 lhbm_1300_1100_rgb_ratio[LHBM_RGB_RATIO_SIZE] = {922974324, 910436713, 898442180};
+static const u32 lhbm_990_1300_rgb_ratio[LHBM_RGB_RATIO_SIZE] = {1089563019, 1063348416, 1099934254};
+static const u32 lhbm_1208_1300_rgb_ratio[LHBM_RGB_RATIO_SIZE] = {1029306415, 1018581722, 1029205963};
+static const u32 lhbm_1280_1300_rgb_ratio[LHBM_RGB_RATIO_SIZE] = {1005012531, 1005714286, 1003953871};
+static const u32 lhbm_1250_1300_rgb_ratio[LHBM_RGB_RATIO_SIZE] = {1013985465, 1011108127, 1012870314};
+static const u32 lhbm_1270_1300_rgb_ratio[LHBM_RGB_RATIO_SIZE] = {1005722353, 1004545049, 1005266073};
 
 static const struct exynos_dsi_cmd s6e3fc5_off_cmds[] = {
 	EXYNOS_DSI_CMD(display_off, 0),
@@ -59,7 +66,10 @@ static DEFINE_EXYNOS_CMD_SET(s6e3fc5_off);
 static const struct exynos_dsi_cmd s6e3fc5_lp_cmds[] = {
 	EXYNOS_DSI_CMD(display_off, 0),
 	EXYNOS_DSI_CMD0(test_key_on_f0),
-	EXYNOS_DSI_CMD0(new_gamma_ip_bypass),
+	EXYNOS_DSI_CMD_SEQ_REV(PANEL_REV_GE(PANEL_REV_EVT1), 0xB9, 0x30),
+	EXYNOS_DSI_CMD0_REV(freq_update, PANEL_REV_GE(PANEL_REV_EVT1)),
+	EXYNOS_DSI_CMD0_REV(new_gamma_ip_bypass, PANEL_REV_LT(PANEL_REV_EVT1)),
+	EXYNOS_DSI_CMD0_REV(new_gamma_ip_enable, PANEL_REV_GE(PANEL_REV_EVT1)),
 	EXYNOS_DSI_CMD0(test_key_off_f0),
 };
 static DEFINE_EXYNOS_CMD_SET(s6e3fc5_lp);
@@ -156,6 +166,66 @@ struct s6e3fc5_panel {
 
 #define to_spanel(ctx) container_of(ctx, struct s6e3fc5_panel, base)
 
+static void s6e3fc5_update_lhbm_gamma(struct exynos_panel *ctx)
+{
+	/* ratio provided by HW for update the LHBM gamma.
+	 * ratio must be a integer due to kernel didn't support floating.
+	 * ratio original value R: 0.922974324, G: 0.910436713, B: 0.898442180.
+	 * ratio cannot exceed u32 max 4294967296.
+	 * R gamma hex from last 16bit from gamma_cmd[1] combine with gamma_cmd[3]
+	 * G gamma hex from first 16bit from gamma_cmd[2] combine with gamma_cmd[4]
+	 * B gamma hex from last 16bit from gamma_cmd[2] combine with gamma_cmd[5]
+	 */
+	struct s6e3fc5_panel *spanel = to_spanel(ctx);
+	u8 *gamma_cmd = spanel->local_hbm_gamma.hs_cmd;
+	const int *rgb_ratio = NULL;
+	const u8 rgb_offset[3][2] = {{1, 3}, {2, 4}, {2,5}};
+	u8 new_gamma_cmd[LHBM_GAMMA_CMD_SIZE] = {0};
+	u64 tmp;
+	int i;
+	u16 mask, shift;
+
+	if (ctx->panel_rev < PANEL_REV_EVT1)
+		rgb_ratio = lhbm_1300_1100_rgb_ratio;
+	else if (ctx->panel_rev == PANEL_REV_EVT1)
+		rgb_ratio = lhbm_990_1300_rgb_ratio;
+	else if (ctx->panel_rev == PANEL_REV_EVT1_0_2)
+		rgb_ratio = lhbm_1208_1300_rgb_ratio;
+	else if (ctx->panel_rev == PANEL_REV_EVT1_1)
+		rgb_ratio = lhbm_1280_1300_rgb_ratio;
+	else if (ctx->panel_rev == PANEL_REV_DVT1)
+		rgb_ratio = lhbm_1250_1300_rgb_ratio;
+	else if (ctx->panel_rev >= PANEL_REV_DVT1_1)
+		rgb_ratio = lhbm_1270_1300_rgb_ratio;
+
+	if (!rgb_ratio)
+		return;
+
+	dev_info(ctx->dev, "%s: gamma_cmd(%02x %02x %02x %02x %02x)\n", __func__,
+		gamma_cmd[1], gamma_cmd[2], gamma_cmd[3], gamma_cmd[4], gamma_cmd[5]);
+	for (i = 0; i < LHBM_RGB_RATIO_SIZE ; i++) {
+		if (i % 2) {
+			mask = 0xf0;
+			shift = 4;
+		} else {
+			mask = 0x0f;
+			shift = 0;
+		}
+		tmp = ((gamma_cmd[rgb_offset[i][0]] & mask) >> shift) << 8 | gamma_cmd[rgb_offset[i][1]];
+		dev_dbg(ctx->dev, "%s: lhbm_gamma[%d] = %llu\n", __func__, i, tmp);
+		/* Round off and revert to original gamma value */
+		tmp = (tmp * rgb_ratio[i] + 500000000)/1000000000;
+		dev_dbg(ctx->dev, "%s: new lhbm_gamma[%d] = %llu\n", __func__, i, tmp);
+		new_gamma_cmd[rgb_offset[i][0]] |= ((tmp & 0xff00) >> 8) << shift;
+		new_gamma_cmd[rgb_offset[i][1]] |= tmp & 0xff;
+	}
+	memcpy(&gamma_cmd[1], &new_gamma_cmd[1], LHBM_GAMMA_CMD_SIZE - 1);
+	dev_info(ctx->dev, "%s: new_gamma_cmd(%02x %02x %02x %02x %02x)\n", __func__,
+		gamma_cmd[1], gamma_cmd[2], gamma_cmd[3], gamma_cmd[4], gamma_cmd[5]);
+	dev_info(ctx->dev, "%s: rgb_ratio(%u %u %u)\n", __func__,
+		rgb_ratio[0], rgb_ratio[1], rgb_ratio[2]);
+}
+
 static void s6e3fc5_lhbm_gamma_read(struct exynos_panel *ctx)
 {
 	struct mipi_dsi_device *dsi = to_mipi_dsi_device(ctx->dev);
@@ -204,6 +274,8 @@ static void s6e3fc5_lhbm_gamma_read(struct exynos_panel *ctx)
 	}
 
 	EXYNOS_DCS_WRITE_TABLE(ctx, test_key_off_f0);
+
+	s6e3fc5_update_lhbm_gamma(ctx);
 }
 
 static void s6e3fc5_lhbm_gamma_write(struct exynos_panel *ctx)
@@ -325,10 +397,20 @@ static void s6e3fc5_change_frequency(struct exynos_panel *ctx,
 		return;
 
 	EXYNOS_DCS_WRITE_TABLE(ctx, test_key_on_f0);
-	if (vrefresh == 90)
+	if (vrefresh == 90) {
 		EXYNOS_DCS_WRITE_TABLE(ctx, hs90_setting);
-	else
+		if (ctx->panel_rev >= PANEL_REV_EVT1) {
+			EXYNOS_DCS_WRITE_SEQ(ctx, 0xB9, 0x31);
+			EXYNOS_DCS_WRITE_SEQ(ctx, 0xB0, 0x00, 0x10, 0xB9);
+			EXYNOS_DCS_WRITE_SEQ(ctx, 0xB9, 0x00, 0x25, 0x00, 0x0C);
+		}
+	}
+	else {
 		EXYNOS_DCS_WRITE_TABLE(ctx, hs60_setting);
+		if (ctx->panel_rev >= PANEL_REV_EVT1) {
+			EXYNOS_DCS_WRITE_SEQ(ctx, 0xB9, 0x30);
+		}
+	}
 	EXYNOS_DCS_WRITE_TABLE(ctx, freq_update);
 	EXYNOS_DCS_WRITE_TABLE(ctx, test_key_off_f0);
 
@@ -382,6 +464,31 @@ static void s6e3fc5_update_wrctrld(struct exynos_panel *ctx)
 		ctx->hbm.local_hbm.enabled ? "on" : "off");
 
 	EXYNOS_DCS_WRITE_SEQ(ctx, MIPI_DCS_WRITE_CONTROL_DISPLAY, val);
+}
+
+#define MAX_BR_HBM_EVT1_0_2 4094
+static int s6e3fc5_set_brightness(struct exynos_panel *ctx, u16 br)
+{
+	u16 brightness;
+
+	if (ctx->current_mode->exynos_mode.is_lp_mode) {
+		const struct exynos_panel_funcs *funcs;
+
+		funcs = ctx->desc->exynos_panel_func;
+		if (funcs && funcs->set_binned_lp)
+			funcs->set_binned_lp(ctx, br);
+		return 0;
+	}
+
+	if (ctx->panel_rev <= PANEL_REV_EVT1_0_2 && br >= MAX_BR_HBM_EVT1_0_2) {
+		br = MAX_BR_HBM_EVT1_0_2;
+		dev_dbg(ctx->dev, "%s: capped to dbv(%d) for EVT1_0_2 and before\n",
+			__func__, MAX_BR_HBM_EVT1_0_2);
+	}
+
+	brightness = (br & 0xff) << 8 | br >> 8;
+
+	return exynos_dcs_set_brightness(ctx, brightness);
 }
 
 static void s6e3fc5_set_nolp_mode(struct exynos_panel *ctx,
@@ -487,37 +594,12 @@ static void s6e3fc5_set_dimming_on(struct exynos_panel *exynos_panel,
 static void s6e3fc5_set_local_hbm_mode(struct exynos_panel *exynos_panel,
 				 bool local_hbm_en)
 {
-	const struct exynos_panel_mode *pmode;
-
-	if (exynos_panel->hbm.local_hbm.enabled == local_hbm_en)
-		return;
-
-	pmode = exynos_panel->current_mode;
-	if (unlikely(pmode == NULL)) {
-		dev_err(exynos_panel->dev, "%s: unknown current mode\n", __func__);
-		return;
-	}
-	if (local_hbm_en) {
-		const int vrefresh = drm_mode_vrefresh(&pmode->mode);
-		/* Add check to turn on LHBM @ 90hz only */
-		if (vrefresh != 90) {
-			dev_err(exynos_panel->dev,
-				"unexpected mode `%s` while enabling LHBM, give up\n",
-				pmode->mode.name);
-			return;
-		}
-	}
-
-	exynos_panel->hbm.local_hbm.enabled = local_hbm_en;
 	s6e3fc5_update_wrctrld(exynos_panel);
 }
 
 static void s6e3fc5_mode_set(struct exynos_panel *ctx,
 			     const struct exynos_panel_mode *pmode)
 {
-	if (!ctx->enabled)
-		return;
-
 	s6e3fc5_change_frequency(ctx, drm_mode_vrefresh(&pmode->mode));
 }
 
@@ -542,33 +624,37 @@ static void s6e3fc5_get_panel_rev(struct exynos_panel *ctx, u32 id)
 {
 	/* extract command 0xDB */
 	u8 build_code = (id & 0xFF00) >> 8;
-	u8 rev = build_code >> 2;
+	u8 rev = build_code;
 
 	switch (rev) {
-	case 4:
+	case 0x0A:
 		ctx->panel_rev = PANEL_REV_PROTO1;
 		break;
-	case 5:
+	case 0x14:
 		ctx->panel_rev = PANEL_REV_PROTO1_1;
 		break;
-	case 6:
+	case 0x18:
 		ctx->panel_rev = PANEL_REV_PROTO1_2;
-	case 8:
-		ctx->panel_rev = PANEL_REV_EVT1;
-		break;
-	case 9:
-		ctx->panel_rev = PANEL_REV_EVT1_1;
-		break;
-	case 0x0A:
-		ctx->panel_rev = PANEL_REV_EVT1_2;
-		break;
-	case 0x10:
-		ctx->panel_rev = PANEL_REV_DVT1;
-		break;
-	case 0x11:
-		ctx->panel_rev = PANEL_REV_DVT1_1;
 		break;
 	case 0x20:
+		ctx->panel_rev = PANEL_REV_EVT1;
+		break;
+	case 0x21:
+		ctx->panel_rev = PANEL_REV_EVT1_0_2;
+		break;
+	case 0x24:
+		ctx->panel_rev = PANEL_REV_EVT1_1;
+		break;
+	case 0x28:
+		ctx->panel_rev = PANEL_REV_EVT1_2;
+		break;
+	case 0x40:
+		ctx->panel_rev = PANEL_REV_DVT1;
+		break;
+	case 0x60:
+		ctx->panel_rev = PANEL_REV_DVT1_1;
+		break;
+	case 0x80:
 		ctx->panel_rev = PANEL_REV_PVT;
 		break;
 	default:
@@ -579,7 +665,7 @@ static void s6e3fc5_get_panel_rev(struct exynos_panel *ctx, u32 id)
 		return;
 	}
 
-	dev_info(ctx->dev, "panel_rev: 0x%x\n", ctx->panel_rev);
+	dev_info(ctx->dev, "panel_rev: 0x%x, build id: 0x%x\n", ctx->panel_rev, rev);
 }
 
 static int s6e3fc5_panel_probe(struct mipi_dsi_device *dsi)
@@ -608,6 +694,7 @@ static const struct exynos_panel_mode s6e3fc5_modes[] = {
 	{
 		/* 1080x2400 @ 60Hz */
 		.mode = {
+			.name = "1080x2400x60",
 			.clock = 168498,
 			.hdisplay = 1080,
 			.hsync_start = 1080 + 32, // add hfp
@@ -624,6 +711,7 @@ static const struct exynos_panel_mode s6e3fc5_modes[] = {
 		.exynos_mode = {
 			.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
 			.vblank_usec = 120,
+			.te_usec = 5720,
 			.bpc = 8,
 			.dsc = {
 				.enabled = true,
@@ -641,6 +729,7 @@ static const struct exynos_panel_mode s6e3fc5_modes[] = {
 	{
 		/* 1080x2400 @ 90Hz */
 		.mode = {
+			.name ="1080x2400x90",
 			.clock = 252747,
 			.hdisplay = 1080,
 			.hsync_start = 1080 + 32, // add hfp
@@ -657,6 +746,7 @@ static const struct exynos_panel_mode s6e3fc5_modes[] = {
 		.exynos_mode = {
 			.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
 			.vblank_usec = 120,
+			.te_usec = 222,
 			.bpc = 8,
 			.dsc = {
 				.enabled = true,
@@ -715,7 +805,7 @@ static const struct drm_panel_funcs s6e3fc5_drm_funcs = {
 };
 
 static const struct exynos_panel_funcs s6e3fc5_exynos_funcs = {
-	.set_brightness = exynos_panel_set_brightness,
+	.set_brightness = s6e3fc5_set_brightness,
 	.set_lp_mode = exynos_panel_set_lp_mode,
 	.set_nolp_mode = s6e3fc5_set_nolp_mode,
 	.set_binned_lp = exynos_panel_set_binned_lp,
@@ -737,7 +827,7 @@ const struct brightness_capability s6e3fc5_brightness_capability = {
 	.normal = {
 		.nits = {
 			.min = 2,
-			.max = 500,
+			.max = 600,
 		},
 		.level = {
 			.min = 4,
@@ -745,12 +835,12 @@ const struct brightness_capability s6e3fc5_brightness_capability = {
 		},
 		.percentage = {
 			.min = 0,
-			.max = 50,
+			.max = 60,
 		},
 	},
 	.hbm = {
 		.nits = {
-			.min = 550,
+			.min = 600,
 			.max = 1000,
 		},
 		.level = {
@@ -758,7 +848,7 @@ const struct brightness_capability s6e3fc5_brightness_capability = {
 			.max = 4095,
 		},
 		.percentage = {
-			.min = 50,
+			.min = 60,
 			.max = 100,
 		},
 	},

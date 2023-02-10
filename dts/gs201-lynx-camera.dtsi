@@ -291,6 +291,9 @@
 					 1000
 					 1000
 					 1000>;
+				transaction-thread-priority = <99>;
+
+				i2c-lock-group-id = <0>;
 			};
 
 			/* FRONT CAMERA IMX712 */
@@ -313,7 +316,7 @@
 
 				/* Power supplies */
 				s2mpg13_ldo12-supply = <&s_ldo12_reg>;
-				gpio2-supply = <&slg51002_gpio2>;
+				ldo2-supply = <&slg51002_ldo2>;
 				ldo7-supply = <&slg51002_ldo7>;
 
 				clocks =
@@ -334,7 +337,7 @@
 				/* Power up sequence */
 				power-up-seqs =
 					"s2mpg13_ldo12",
-					"gpio2",
+					"ldo2",
 					"ldo7",
 					"reset",
 					"mclk_on";
@@ -356,7 +359,7 @@
 					"mclk_off",
 					"reset",
 					"ldo7",
-					"gpio2",
+					"ldo2",
 					"s2mpg13_ldo12";
 				power-down-seq-types =
 					"pinctrl",
@@ -370,6 +373,9 @@
 					 1000
 					 1000
 					 1000>;
+				transaction-thread-priority = <99>;
+
+				i2c-lock-group-id = <1>;
 			};
 
 			/* REAR ULTRA WIDE CAMERA IMX712 */
@@ -449,6 +455,9 @@
 					 1000
 					 1000
 					 1000>;
+				transaction-thread-priority = <99>;
+
+				i2c-lock-group-id = <2>;
 			};
 
 			/* Eeprom lc898129 for imx787 */
@@ -498,6 +507,8 @@
 					<1000
 					 1000
 					 1000>;
+
+				i2c-lock-group-id = <0>;
 			};
 
 			/* Eeprom m24c64x for imx712 */
@@ -533,6 +544,8 @@
 					"regulator";
 				power-down-seq-delays-us =
 					<1000>;
+
+				i2c-lock-group-id = <1>;
 			};
 
 			/* Eeprom m24c64x for imx712-uw */
@@ -568,6 +581,8 @@
 					"regulator";
 				power-down-seq-delays-us =
 					<1000>;
+
+				i2c-lock-group-id = <2>;
 			};
 
 			/* Actuator lc898129 for imx787 */
@@ -617,6 +632,10 @@
 					<1000
 					 1000
 					 1000>;
+				/* Thread priority */
+				periodic-io-thread-priority = <99>;
+
+				i2c-lock-group-id = <0>;
 			};
 
 			/* Ois lc898129 for imx787 */
@@ -666,6 +685,10 @@
 					<1000
 					 1000
 					 1000>;
+				/* Thread priority */
+				periodic-io-thread-priority = <99>;
+
+				i2c-lock-group-id = <0>;
 			};
 
 			flash0: flash@0 {
